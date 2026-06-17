@@ -9,40 +9,35 @@ st.set_page_config(page_title="Calendar", page_icon="📅", layout="wide")
 st.title("📅 Match Calendar")
 
 @st.cache_data(ttl=3600)
-def get_worldcup_schedule():
-    # Pull directly from the requested jfjelstul dataset
-    url = "https://raw.githubusercontent.com/jfjelstul/worldcup/master/data-csv/matches.csv"
-    df_wc = pd.read_csv(url)
+def get_calendar_data():
+    url = "https://raw.githubusercontent.com/martj42/international_results/master/results.csv"
+    df = pd.read_csv(url)
+    df['date'] = pd.to_datetime(df['date'])
     
-    # Filter strictly for 2026 matches
-    df_wc['match_date'] = pd.to_datetime(df_wc['match_date'])
-    df_2026 = df_wc[df_wc['match_date'].dt.year == 2026].copy()
-    
-    # Sort sequentially
-    df_2026 = df_2026.sort_values('match_date').reset_index(drop=True)
-    return df_2026
+    # Filter exclusively for 2026 FIFA World Cup matches
+    df_wc = df[df['tournament'] == 'FIFA World Cup'].copy()
+    df_wc = df_wc[df_wc['date'].dt.year == 2026].sort_values('date')
+    return df_wc.reset_index(drop=True)
 
 try:
-    df = get_worldcup_schedule()
+    df = get_calendar_data()
     
     if df.empty:
-        st.info("Waiting for the upstream jfjelstul repository to push 2026 matches.")
+        st.info("No 2026 World Cup matches found.")
     else:
-        # Columns to display nicely
-        display_cols = ['match_date', 'stage_name', 'home_team_name', 'home_team_score', '-', 'away_team_score', 'away_team_name', 'score']
-        
-        # Insert a dummy column for visual separation in the dataframe
+        display_cols = ['date', 'home_team', 'home_score', '-', 'away_score', 'away_team', 'city']
         df['-'] = 'vs'
         df_display = df[display_cols]
 
-        upcoming = df_display[df_display['home_team_score'].isna()].copy()
-        past = df_display.dropna(subset=['home_team_score']).copy()
+        # Split into past (has scores) and upcoming (NaN scores)
+        past = df_display.dropna(subset=['home_score']).copy()
+        upcoming = df_display[df_display['home_score'].isna()].copy()
 
-        st.subheader("Upcoming Matches (Scores = NaN)")
-        st.dataframe(upcoming, use_container_width=True, hide_index=True)
+        st.subheader("Last 5 Concluded Matches")
+        st.dataframe(past.tail(5).sort_values('date', ascending=False), use_container_width=True, hide_index=True)
 
-        st.subheader("Recently Concluded Matches")
-        st.dataframe(past.sort_values('match_date', ascending=False), use_container_width=True, hide_index=True)
+        st.subheader("Next 5 Upcoming Matches")
+        st.dataframe(upcoming.head(5), use_container_width=True, hide_index=True)
 
 except Exception as e:
-    st.error(f"Failed to load data from repository: {e}")
+    st.error(f"Failed to load data: {e}")
