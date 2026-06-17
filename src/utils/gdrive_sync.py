@@ -8,19 +8,32 @@ from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 from src.config import MODEL_DIR
 
 def get_drive_service():
-    # Attempt to load from Streamlit secrets first, fallback to OS environment variables
+    creds_info = None
+    folder_id = None
+    
+    # Check Streamlit secrets natively
     try:
         import streamlit as st
-        creds_json_str = st.secrets.get("GCP_SA_KEY", os.environ.get("GCP_SA_KEY"))
         folder_id = st.secrets.get("GDRIVE_FOLDER_ID", os.environ.get("GDRIVE_FOLDER_ID"))
+        
+        if "gcp_service_account" in st.secrets:
+            # Streamlit automatically converted the TOML block into a dict
+            creds_info = dict(st.secrets["gcp_service_account"])
+        else:
+            # Fallback string parsing (with strict=False to bypass \n control character errors)
+            creds_json_str = st.secrets.get("GCP_SA_KEY", os.environ.get("GCP_SA_KEY"))
+            if creds_json_str:
+                creds_info = json.loads(creds_json_str, strict=False)
     except Exception:
+        # Fallback to local OS environment variables (for GitHub Actions)
         creds_json_str = os.environ.get("GCP_SA_KEY")
         folder_id = os.environ.get("GDRIVE_FOLDER_ID")
+        if creds_json_str:
+            creds_info = json.loads(creds_json_str, strict=False)
 
-    if not creds_json_str or not folder_id:
-        raise ValueError("Missing GCP_SA_KEY or GDRIVE_FOLDER_ID environment variables.")
+    if not creds_info or not folder_id:
+        raise ValueError("Missing GCP credentials or GDRIVE_FOLDER_ID. Check Streamlit Secrets.")
 
-    creds_info = json.loads(creds_json_str)
     scopes = ['https://www.googleapis.com/auth/drive']
     creds = Credentials.from_service_account_info(creds_info, scopes=scopes)
     
@@ -60,7 +73,6 @@ def sync_to_drive():
     """Uploads all local models in MODEL_DIR to Google Drive, overwriting existing files."""
     service, folder_id = get_drive_service()
     
-    # Get existing files in drive to overwrite them if they exist
     results = service.files().list(
         q=f"'{folder_id}' in parents and trashed=false",
         fields="files(id, name)"
@@ -76,12 +88,10 @@ def sync_to_drive():
         media = MediaFileUpload(local_path, resumable=True)
         
         if file_name in existing_files:
-            # Update existing file
             file_id = existing_files[file_name]
             print(f"Updating {file_name} in Google Drive...")
             service.files().update(fileId=file_id, media_body=media).execute()
         else:
-            # Create new file
             print(f"Uploading new file {file_name} to Google Drive...")
             service.files().create(body=file_metadata, media_body=media, fields='id').execute()
 
