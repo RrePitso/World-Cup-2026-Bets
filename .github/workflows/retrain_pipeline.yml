@@ -1,0 +1,35 @@
+name: Weekly Model Retrain
+
+# 1. Schedule the run (e.g., every Monday at 00:00 UTC)
+on:
+  schedule:
+    - cron: '0 0 * * 1'
+  workflow_dispatch: # Allows you to click a "Run" button manually on GitHub
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run Model Training
+      # This script will fetch new data, train, and save to local /models dir
+      run: python src/models/train.py 
+
+    - name: Sync Models to Google Drive
+      # You will need to set up GCP Service Account credentials in GitHub Secrets
+      env:
+        GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }} 
+      run: python src/utils/gdrive_sync.py --upload
