@@ -1,5 +1,9 @@
-import streamlit as st
+import sys
 import os
+# Point Python to the root directory
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+import streamlit as st
 from src.config import MODEL_DIR
 from src.utils.gdrive_sync import sync_from_drive
 
