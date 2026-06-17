@@ -20,7 +20,9 @@ else:
 
 if st.button("Force Local Retrain Now"):
     with st.spinner("Training models... Check terminal for output."):
-        result = subprocess.run(["python", "src/models/train.py"], capture_output=True, text=True)
+        # FIXED: Using sys.executable ensures it uses the Streamlit virtual environment
+        result = subprocess.run([sys.executable, "src/models/train.py"], capture_output=True, text=True)
+        
         st.code(result.stdout)
         if result.stderr:
             st.error(result.stderr)
