@@ -1,0 +1,8 @@
+pandas
+numpy
+scikit-learn
+scipy
+requests
+streamlit
+google-auth
+google-api-python-client
