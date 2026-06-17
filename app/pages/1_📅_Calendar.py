@@ -1,3 +1,8 @@
+import sys
+import os
+# Point Python to the root directory (up two levels from /pages)
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+
 import streamlit as st
 import pandas as pd
 from src.data.fetcher import load_international_results
