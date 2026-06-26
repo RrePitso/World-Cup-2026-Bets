@@ -1,21 +1,21 @@
 # World Cup 2026 Predictive Betting Pipeline
+
 ## Overview
 This repository contains a comprehensive, automated machine learning architecture designed to predict match outcomes and expected goals (xG) for the 2026 FIFA World Cup. The pipeline calculates the true probability of match events and identifies positive Expected Value (+EV) betting opportunities by comparing model outputs against live bookmaker odds.
 
 The system utilizes a hybrid modeling approach, combining Random Forest Regressors for expected goals with calibrated classification models, distributed through Poisson probability mass functions to evaluate exact scorelines and Over/Under thresholds.
 
 ## Key Features
-Hybrid Machine Learning Architecture: Utilizes continuous regressors for Expected Goals (xG) and discrete classifiers for match outcomes (1X2).
+* **Hybrid Machine Learning Architecture**: Utilizes continuous regressors for Expected Goals (xG) and discrete classifiers for match outcomes (1X2).
+* **Probability Calibration**: Implements Platt Scaling (Sigmoid) and Isotonic Regression via `CalibratedClassifierCV` to correct probability biases inherent in tree-based models, ensuring predictions represent true betting probabilities.
+* **Dynamic Feature Engineering**: Integrates rolling historical metrics (Elo ratings, form, goal difference) with real-world heuristics (Transfermarkt squad values, Open-Meteo weather APIs, travel rest days, and group-stage stakes).
+* **Automated MLOps**: Features a fully automated CI/CD pipeline using GitHub Actions to fetch new data, retrain the models, and generate predictions daily.
+* **Interactive Dashboard**: Includes a Streamlit web application for visualizing upcoming fixtures, model confidence intervals, and betting edges.
 
-Probability Calibration: Implements Platt Scaling (Sigmoid) and Isotonic Regression via CalibratedClassifierCV to correct probability biases inherent in tree-based models, ensuring predictions represent true betting probabilities.
-
-Dynamic Feature Engineering: Integrates rolling historical metrics (Elo ratings, form, goal difference) with real-world heuristics (Transfermarkt squad values, Open-Meteo weather APIs, travel rest days, and group-stage stakes).
-
-Automated MLOps: Features a fully automated CI/CD pipeline using GitHub Actions to fetch new data, retrain the models, and generate predictions daily.
-
-Interactive Dashboard: Includes a Streamlit web application for visualizing upcoming fixtures, model confidence intervals, and betting edges.
+---
 
 ## Repository Structure
+```text
 world-cup-2026-bets/
 │
 ├── .github/workflows/
@@ -46,7 +46,6 @@ world-cup-2026-bets/
 │
 ├── Betting.ipynb                # Jupyter Notebook for exploratory data analysis (EDA)
 └── requirements.txt             # Python environment dependencies
-
 ## Methodology
 1. Feature Engineering
 The pipeline avoids lookahead bias by strictly utilizing a chronological train/test split. Features are engineered dynamically, computing pre-match states for every historical fixture. Variables include team strength disparities, fatigue indexing, and environmental penalties (e.g., high heat or humidity impacts).
