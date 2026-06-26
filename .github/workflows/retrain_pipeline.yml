@@ -8,6 +8,8 @@ on:
 jobs:
   retrain:
     runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: .     # Sets root directory in Python path to fix ModuleNotFoundError
 
     steps:
     - name: Checkout repository
