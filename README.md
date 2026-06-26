@@ -44,7 +44,7 @@ world-cup-2026-bets/
 │       ├── betting.py           # EV calculations, Kelly Criterion, and edge detection
 │       └── gdrive_sync.py       # State management and cloud synchronization
 │
-├── Betting.ipynb                # Jupyter Notebook for exploratory data analysis (EDA)
+├── Betting.ipynb                # Jupyter Notebook for Model Iteration & Analysis
 └── requirements.txt             # Python environment dependencies
 ## Methodology
 1. Feature Engineering
