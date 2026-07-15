@@ -7,8 +7,8 @@ streamlit
 google-auth
 google-api-python-client
 joblib
-langchain
-langchain-google-genai
-langchain-community
-chromadb
-langsmith
+langchain==0.3.7
+langchain-google-genai==2.0.4
+langchain-community==0.3.5
+chromadb==0.5.20
+langsmith==0.1.147
