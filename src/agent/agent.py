@@ -17,7 +17,7 @@ Be honest about uncertainty — do not overstate confidence beyond what the mode
 
 def get_agent_executor(gemini_api_key: str) -> AgentExecutor:
     llm = ChatGoogleGenerativeAI(
-        model="gemini-1.5-pro",
+        model="gemini-2.5-flash",
         google_api_key=gemini_api_key,
         temperature=0.2,
     )
