@@ -19,7 +19,7 @@ _vectorstore = None
 def get_vectorstore(api_key: str):
     global _vectorstore
     if _vectorstore is None:
-        embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=api_key)
+        embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001", google_api_key=api_key)
         _vectorstore = Chroma.from_documents(team_notes, embeddings)
     return _vectorstore
 
