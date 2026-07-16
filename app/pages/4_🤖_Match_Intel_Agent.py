@@ -5,7 +5,7 @@ import sys
 import os
 
 # Add parent directory to path so src module can be imported
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 import streamlit as st
 from datetime import datetime
@@ -65,7 +65,7 @@ with st.sidebar:
     st.markdown("---")
     
     # Example questions
-    st.subheader("💡 Example Questions")
+    st.subheader("��� Example Questions")
     example_questions = [
         "Should I trust England to beat Argentina?",
         "What's the betting value on Germany to beat Japan at 1.90 odds?",
