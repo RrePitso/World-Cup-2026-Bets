@@ -1,8 +1,13 @@
 """
 Streamlit page for the Match Intel Agent - interactive chat interface for betting analysis.
 """
-import streamlit as st
+import sys
 import os
+
+# Add parent directory to path so src module can be imported
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))))
+
+import streamlit as st
 from datetime import datetime
 from src.agent.agent import get_agent_executor
 from src.agent.knowledge import answer_general_question
