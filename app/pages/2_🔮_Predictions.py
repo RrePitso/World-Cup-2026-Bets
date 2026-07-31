@@ -15,7 +15,7 @@ st.title("🔮 Edge Calculator & Predictions")
 def init_connection():
     return pyodbc.connect(
         "DRIVER={ODBC Driver 17 for SQL Server};"
-        f"SERVER={st.secrets['fabric']['server']};"
+        f"SERVER=tcp:{st.secrets['fabric']['server']},1433;"
         f"DATABASE={st.secrets['fabric']['database']};"
         f"UID={st.secrets['fabric']['username']};"
         f"PWD={st.secrets['fabric']['password']};"
