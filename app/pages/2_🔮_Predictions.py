@@ -11,20 +11,8 @@ from src.data.fetcher import load_international_results
 st.set_page_config(page_title="Predictions & EV", page_icon="🔮", layout="wide")
 st.title("🔮 Edge Calculator & Predictions")
 
-TEAM_NAME_MAP = {
-    'usa': 'united states',
-    'us': 'united states',
-    'korea republic': 'south korea',
-    'dr congo': 'congo dr',
-    'czechia': 'czech republic'
-}
-
-def normalize_team(name):
-    if pd.isna(name): return ""
-    clean = str(name).strip().lower()
-    return TEAM_NAME_MAP.get(clean, clean)
-
-@st.cache_resource
+# --- 1. Database Connection to Fabric ---
+# Removed @st.cache_resource so Streamlit doesn't reuse dead/dropped Azure connections (Fixes 08S01)
 def init_connection():
     return pyodbc.connect(
         "DRIVER={ODBC Driver 17 for SQL Server};"
@@ -39,14 +27,13 @@ def init_connection():
 @st.cache_data(ttl=3600)
 def get_gold_predictions():
     conn = init_connection()
-    query = """
-        SELECT 
-            home_team, away_team, prob_home_win, prob_draw, prob_away_win, 
-            dc_exp_home, dc_exp_away, predicted_total_goals
-        FROM dbo.gold_match_predictions
-    """
-    return pd.read_sql(query, conn)
+    # Reverted to basic SELECT * to prevent any column mapping issues
+    query = "SELECT * FROM dbo.gold_match_predictions"
+    df = pd.read_sql(query, conn)
+    conn.close() # Explicitly close the connection to prevent lingering zombie sessions
+    return df
 
+# --- 2. Fetch Gold Data ---
 try:
     with st.spinner("Fetching predictions from Microsoft Fabric..."):
         df_predictions = get_gold_predictions()
@@ -65,16 +52,22 @@ except Exception as e:
     st.warning(f"Could not load official calendar fixtures: {e}")
     wc_games = pd.DataFrame()
 
-# --- EVALUATION TOGGLE WITH PAGINATION ---
+# --- 3. EVALUATION TOGGLE WITH PAGINATION ---
 evaluate_mode = st.toggle("📊 Show Actual Results & Evaluate Model Accuracy")
 
-if evaluate_mode and not wc_games.empty:
+if evaluate_mode and not df_predictions.empty:
     st.subheader("Model Post-Mortem: Predictions vs Reality")
     
-    wc_games['join_home'] = wc_games['home_team'].apply(normalize_team)
-    wc_games['join_away'] = wc_games['away_team'].apply(normalize_team)
-    df_predictions['join_home'] = df_predictions['home_team'].apply(normalize_team)
-    df_predictions['join_away'] = df_predictions['away_team'].apply(normalize_team)
+    if not wc_games.empty:
+        # Reverted to your original string manipulation logic
+        wc_games['join_home'] = wc_games['home_team'].str.strip().str.lower()
+        wc_games['join_away'] = wc_games['away_team'].str.strip().str.lower()
+    else:
+        wc_games['join_home'] = []
+        wc_games['join_away'] = []
+        
+    df_predictions['join_home'] = df_predictions['home_team'].str.strip().str.lower()
+    df_predictions['join_away'] = df_predictions['away_team'].str.strip().str.lower()
     
     # LEFT JOIN: Keeps ONLY World Cup games from the calendar
     eval_df = pd.merge(wc_games, df_predictions, on=['join_home', 'join_away'], how='left')
@@ -132,7 +125,7 @@ if evaluate_mode and not wc_games.empty:
     paged_df = eval_df.iloc[start_idx:end_idx].copy()
 
     clean_df = paged_df.rename(columns={
-        'date': 'Date', 'home_team': 'Home', 'away_team': 'Away', 
+        'date': 'Date', 'home_team_x': 'Home', 'away_team_x': 'Away', 
         'home_score': 'Home Goals', 'away_score': 'Away Goals'
     })
     
@@ -150,7 +143,7 @@ if evaluate_mode and not wc_games.empty:
     st.dataframe(clean_df.style.apply(highlight_correct, axis=1), use_container_width=True, hide_index=True)
     st.stop()
 
-# --- Default Betting Mode ---
+# --- 4. Default Betting Mode ---
 if not wc_games.empty:
     default_games = wc_games[['home_team', 'away_team', 'city']].copy()
     default_games.rename(columns={'home_team': 'Home', 'away_team': 'Away', 'city': 'Venue'}, inplace=True)
@@ -172,9 +165,10 @@ if st.button("Calculate Edges"):
             
         st.markdown(f"### {home} vs {away} 📍 {venue}")
         
+        # Reverted strictly back to your logic
         match_data = df_predictions[
-            (df_predictions['join_home'] == normalize_team(home)) & 
-            (df_predictions['join_away'] == normalize_team(away))
+            (df_predictions['home_team'].str.strip().str.lower() == str(home).strip().lower()) & 
+            (df_predictions['away_team'].str.strip().str.lower() == str(away).strip().lower())
         ]
         
         if match_data.empty:
@@ -182,13 +176,15 @@ if st.button("Calculate Edges"):
             continue
             
         match = match_data.iloc[0]
+        
         ev_h, edge_h, kelly_h = calc_ev(match['prob_home_win'], o_h)
         ev_d, edge_d, kelly_d = calc_ev(match['prob_draw'], o_d)
         ev_a, edge_a, kelly_a = calc_ev(match['prob_away_win'], o_a)
         
         col1, col2, col3 = st.columns(3)
         col1.metric(f"Home Win ({match['prob_home_win']*100:.1f}%)", f"EV: {ev_h*100:+.1f}%", ev_flag(ev_h, edge_h))
-        col2.metric(f"Draw ({match['prob_draw']*100:.1f}%)", f"EV: {ev_d*100:+.1f}%", ev_flag(ev_a, edge_a))
+        # Fixed ev_a being passed to Draw ev_flag from the last iteration
+        col2.metric(f"Draw ({match['prob_draw']*100:.1f}%)", f"EV: {ev_d*100:+.1f}%", ev_flag(ev_d, edge_d))
         col3.metric(f"Away Win ({match['prob_away_win']*100:.1f}%)", f"EV: {ev_a*100:+.1f}%", ev_flag(ev_a, edge_a))
         
         lam = match.get('dc_exp_home', 0) + match.get('dc_exp_away', 0)
