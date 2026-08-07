@@ -6,9 +6,23 @@ import streamlit as st
 import pandas as pd
 import pyodbc
 import itertools
+from src.data.fetcher import load_international_results
 
 st.set_page_config(page_title="Tournament Simulator", page_icon="🏆", layout="wide")
 st.title("🏆 Monte Carlo Bracket Simulator")
+
+TEAM_NAME_MAP = {
+    'usa': 'united states',
+    'us': 'united states',
+    'korea republic': 'south korea',
+    'dr congo': 'congo dr',
+    'czechia': 'czech republic'
+}
+
+def normalize_team(name):
+    if pd.isna(name): return ""
+    clean = str(name).strip().lower()
+    return TEAM_NAME_MAP.get(clean, clean)
 
 # --- Database Connection ---
 def init_connection():
@@ -29,6 +43,18 @@ def get_gold_predictions():
     conn.close()
     return df
 
+@st.cache_data(ttl=3600)
+def get_calendar_data():
+    try:
+        url = "https://raw.githubusercontent.com/martj42/international_results/master/results.csv"
+        df = pd.read_csv(url)
+        df['date'] = pd.to_datetime(df['date'])
+        df_wc = df[df['tournament'] == 'FIFA World Cup'].copy()
+        df_wc = df_wc[df_wc['date'].dt.year == 2026].sort_values('date')
+        return df_wc.reset_index(drop=True)
+    except Exception as e:
+        return pd.DataFrame()
+
 try:
     df_predictions = get_gold_predictions()
     st.success("✅ Connected to Fabric Lakehouse")
@@ -36,8 +62,10 @@ except Exception as e:
     st.error(f"Failed to connect to Microsoft Fabric: {e}")
     st.stop()
 
-# --- MOCK 2026 GROUPS (48 Teams, 12 Groups of 4) ---
-# Expand this dictionary to include all 48 teams
+wc_games = get_calendar_data()
+if wc_games.empty:
+    st.warning("⚠️ Could not load official calendar fixtures. Reality checks will be disabled.")
+
 # --- MOCK 2026 GROUPS (48 Teams, 12 Groups of 4) ---
 MOCK_GROUPS = {
     'A': ['Mexico', 'South Africa', 'South Korea', 'Czech Republic'],
@@ -56,29 +84,63 @@ MOCK_GROUPS = {
 
 st.subheader("1. Group Stage Standings")
 
+# --- REALITY CHECK HELPER ---
+def get_actual_result_string(t1, t2, df_cal):
+    if df_cal.empty:
+        return "Reality: Data unavailable"
+    
+    t1_clean = normalize_team(t1)
+    t2_clean = normalize_team(t2)
+    
+    match = df_cal[
+        ((df_cal['home_team'].apply(normalize_team) == t1_clean) & (df_cal['away_team'].apply(normalize_team) == t2_clean)) |
+        ((df_cal['home_team'].apply(normalize_team) == t2_clean) & (df_cal['away_team'].apply(normalize_team) == t1_clean))
+    ]
+    
+    if not match.empty:
+        m = match.iloc[0]
+        if pd.notna(m.get('home_score')):
+            return f"**Reality:** {m['home_team']} **{int(m['home_score'])} - {int(m['away_score'])}** {m['away_team']}"
+        else:
+            return "**Reality:** Match Pending"
+    return "Reality: *Teams did not play each other*"
+
 if st.button("Simulate Tournament"):
     group_standings = []
 
-    # --- SIMULATE GROUPS ---
+    # --- SIMULATE GROUPS (WITH BIDIRECTIONAL LOOKUP FIX) ---
     for group, teams in MOCK_GROUPS.items():
         points = {team: 0 for team in teams}
         
         for home, away in itertools.combinations(teams, 2):
+            h_clean = str(home).strip().lower()
+            a_clean = str(away).strip().lower()
+            
             match_data = df_predictions[
-                (df_predictions['home_team'].str.strip().str.lower() == str(home).strip().lower()) & 
-                (df_predictions['away_team'].str.strip().str.lower() == str(away).strip().lower())
+                ((df_predictions['home_team'].str.strip().str.lower() == h_clean) & 
+                 (df_predictions['away_team'].str.strip().str.lower() == a_clean)) |
+                ((df_predictions['home_team'].str.strip().str.lower() == a_clean) & 
+                 (df_predictions['away_team'].str.strip().str.lower() == h_clean))
             ]
             
             if not match_data.empty:
-                match = match_data.iloc[0]
-                probs = {'home': match['prob_home_win'], 'draw': match['prob_draw'], 'away': match['prob_away_win']}
+                m = match_data.iloc[0]
+                db_home = str(m['home_team']).strip().lower()
+                
+                # Dynamically swap probabilities if the database order is reversed
+                if db_home == h_clean:
+                    p_home = m['prob_home_win']
+                    p_away = m['prob_away_win']
+                else:
+                    p_home = m['prob_away_win']
+                    p_away = m['prob_home_win']
+                    
+                probs = {'home': p_home, 'draw': m['prob_draw'], 'away': p_away}
                 outcome = max(probs, key=probs.get)
                 
-                if outcome == 'home':
-                    points[home] += 3
-                elif outcome == 'away':
-                    points[away] += 3
-                else:
+                if outcome == 'home': points[home] += 3
+                elif outcome == 'away': points[away] += 3
+                else: 
                     points[home] += 1
                     points[away] += 1
         
@@ -98,47 +160,58 @@ if st.button("Simulate Tournament"):
     qualified = pd.concat([top_2, third_place])
     st.write(f"**Total Qualified Teams:** {len(qualified)} (Top 2 from each group + 8 best 3rd-place teams)")
     
-    # --- KNOCKOUT BRACKET ENGINE ---
+    # --- KNOCKOUT BRACKET ENGINE (WITH BIDIRECTIONAL LOOKUP FIX) ---
     if len(qualified) == 32:
         st.subheader("3. Knockout Bracket Simulation")
         
-        # Seed teams 1 through 32 based on group stage points
         seeded_teams = qualified.sort_values(by='Points', ascending=False)['Team'].tolist()
         
-        # Build initial Round of 32 matchups (Seed 1 vs 32, Seed 2 vs 31...)
         current_matchups = []
         for i in range(16):
             current_matchups.append((seeded_teams[i], seeded_teams[31-i]))
             
         def simulate_knockout_match(home, away):
+            h_clean = str(home).strip().lower()
+            a_clean = str(away).strip().lower()
+            
             match_data = df_predictions[
-                (df_predictions['home_team'].str.strip().str.lower() == str(home).strip().lower()) & 
-                (df_predictions['away_team'].str.strip().str.lower() == str(away).strip().lower())
+                ((df_predictions['home_team'].str.strip().str.lower() == h_clean) & 
+                 (df_predictions['away_team'].str.strip().str.lower() == a_clean)) |
+                ((df_predictions['home_team'].str.strip().str.lower() == a_clean) & 
+                 (df_predictions['away_team'].str.strip().str.lower() == h_clean))
             ]
+            
             if not match_data.empty:
                 m = match_data.iloc[0]
-                # In knockouts, draws are resolved by extra time/penalties. 
-                # We force a winner by strictly comparing home vs away win probabilities.
-                if m['prob_home_win'] > m['prob_away_win']:
-                    return home
+                db_home = str(m['home_team']).strip().lower()
+                
+                # Dynamically swap probabilities if the database order is reversed
+                if db_home == h_clean:
+                    p_home = m['prob_home_win']
+                    p_away = m['prob_away_win']
                 else:
-                    return away
-            return home # Fallback if prediction is missing
+                    p_home = m['prob_away_win']
+                    p_away = m['prob_home_win']
+                    
+                if p_home > p_away: return home
+                else: return away
+                
+            return home
             
         def play_round(matchups, round_name):
             st.markdown(f"#### {round_name}")
             winners = []
             
-            # Use columns to create a clean, split visual layout
             col1, col2 = st.columns(2)
             for idx, (t1, t2) in enumerate(matchups):
                 winner = simulate_knockout_match(t1, t2)
                 winners.append(winner)
                 
-                display_col = col1 if idx % 2 == 0 else col2
-                display_col.info(f"**{t1}** vs **{t2}**  \n🏆 **{winner}** advances")
+                reality_str = get_actual_result_string(t1, t2, wc_games)
                 
-            # Pair the winners up for the next round
+                display_col = col1 if idx % 2 == 0 else col2
+                display_col.info(f"**{t1}** vs **{t2}**  \n🏆 **{winner}** advances  \n\n*( {reality_str} )*")
+                
             next_matchups = [(winners[i], winners[i+1]) for i in range(0, len(winners), 2)]
             return next_matchups
             
@@ -152,7 +225,11 @@ if st.button("Simulate Tournament"):
         st.divider()
         
         st.markdown("### 🌍 World Cup Final")
-        champion = simulate_knockout_match(final[0][0], final[0][1])
-        st.success(f"## {final[0][0]} vs {final[0][1]}  \n# 🏆 WORLD CHAMPION: {champion}")
+        final_t1, final_t2 = final[0][0], final[0][1]
+        champion = simulate_knockout_match(final_t1, final_t2)
+        
+        reality_final = get_actual_result_string(final_t1, final_t2, wc_games)
+        
+        st.success(f"## {final_t1} vs {final_t2}  \n# 🏆 WORLD CHAMPION: {champion}  \n\n*( {reality_final} )*")
     else:
         st.warning(f"Waiting for full 48-team group configuration. Currently have {len(qualified)} qualified teams.")
