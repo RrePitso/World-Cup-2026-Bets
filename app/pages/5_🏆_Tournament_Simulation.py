@@ -66,7 +66,7 @@ wc_games = get_calendar_data()
 if wc_games.empty:
     st.warning("⚠️ Could not load official calendar fixtures. Reality checks will be disabled.")
 
-# --- MOCK 2026 GROUPS (48 Teams, 12 Groups of 4) ---
+# --- OFFICIAL 2026 GROUPS ---
 MOCK_GROUPS = {
     'A': ['Mexico', 'South Africa', 'South Korea', 'Czech Republic'],
     'B': ['Switzerland', 'Canada', 'Bosnia and Herzegovina', 'Qatar'],
