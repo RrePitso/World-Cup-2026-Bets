@@ -7,7 +7,7 @@ import pandas as pd
 import pyodbc
 from src.utils.betting import calc_ev, ev_flag
 
-st.set_page_config(page_title="Predictions & EV", page_icon="🔮")
+st.set_page_config(page_title="Predictions & EV", page_icon="🔮", layout="wide")
 st.title("🔮 Edge Calculator & Predictions")
 
 # --- 1. Database Connection to Fabric ---
@@ -26,14 +26,27 @@ def init_connection():
 @st.cache_data(ttl=3600)
 def get_gold_predictions():
     conn = init_connection()
-    query = "SELECT * FROM gold_match_predictions"
+    # Explicit schema 'dbo' added to resolve object name error
+    # Select pre-tournament baseline predictions to prevent data leakage
+    query = """
+        SELECT 
+            home_team, 
+            away_team, 
+            prob_home_win, 
+            prob_draw, 
+            prob_away_win, 
+            dc_exp_home, 
+            dc_exp_away, 
+            predicted_total_goals
+        FROM dbo.gold_match_predictions
+    """
     return pd.read_sql(query, conn)
 
 # --- 2. Fetch Gold Data ---
 try:
-    with st.spinner("Fetching predictions from Microsoft Fabric Gold Layer..."):
+    with st.spinner("Fetching pre-tournament predictions from Microsoft Fabric Gold Layer..."):
         df_predictions = get_gold_predictions()
-    st.success("✅ Connected to Fabric Lakehouse!")
+    st.success("✅ Connected to Fabric Lakehouse (Pre-Tournament Data Freeze Active)")
 except Exception as e:
     st.error(f"Failed to connect to Microsoft Fabric: {e}")
     st.stop()
@@ -53,19 +66,19 @@ if st.button("Calculate Edges"):
         
         st.markdown(f"### {home} vs {away} 📍 {venue}")
         
-        # Look up match in Gold Delta Table
+        # Look up match using strict case-insensitive team matching
         match_data = df_predictions[
-            (df_predictions['home_team'].str.lower() == home.lower()) & 
-            (df_predictions['away_team'].str.lower() == away.lower())
+            (df_predictions['home_team'].str.strip().str.lower() == home.strip().lower()) & 
+            (df_predictions['away_team'].str.strip().str.lower() == away.strip().lower())
         ]
         
         if match_data.empty:
-            st.warning(f"No Gold layer predictions found for {home} vs {away}.")
+            st.warning(f"No baseline predictions found in Gold Layer for {home} vs {away}.")
             continue
             
         match = match_data.iloc[0]
         
-        # Calculate EV using stored probabilities
+        # Calculate EV using pure pre-match probabilities
         ev_h, edge_h, kelly_h = calc_ev(match['prob_home_win'], o_h)
         ev_d, edge_d, kelly_d = calc_ev(match['prob_draw'], o_d)
         ev_a, edge_a, kelly_a = calc_ev(match['prob_away_win'], o_a)
