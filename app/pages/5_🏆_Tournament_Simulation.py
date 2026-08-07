@@ -40,18 +40,18 @@ except Exception as e:
 # Expand this dictionary to include all 48 teams
 # --- MOCK 2026 GROUPS (48 Teams, 12 Groups of 4) ---
 MOCK_GROUPS = {
-    'A': ['Mexico', 'South Africa', 'Germany', 'Curaçao'],
-    'B': ['Canada', 'Bosnia and Herzegovina', 'Austria', 'Jordan'],
-    'C': ['United States', 'Paraguay', 'Spain', 'Scotland'],
-    'D': ['Mali', 'Gambia', 'Ivory Coast', 'Comoros'],
-    'E': ['Argentina', 'Egypt', 'Switzerland', 'Colombia'],
-    'F': ['France', 'Morocco', 'Belgium', 'Norway'],
-    'G': ['England', 'Senegal', 'Portugal', 'Ecuador'],
-    'H': ['Brazil', 'Japan', 'Croatia', 'Panama'],
-    'I': ['Italy', 'Nigeria', 'South Korea', 'Honduras'],
-    'J': ['Netherlands', 'Ghana', 'Australia', 'Costa Rica'],
-    'K': ['Uruguay', 'Cameroon', 'Saudi Arabia', 'Jamaica'],
-    'L': ['Denmark', 'Algeria', 'Iran', 'New Zealand']
+    'A': ['Mexico', 'South Africa', 'South Korea', 'Czech Republic'],
+    'B': ['Switzerland', 'Canada', 'Bosnia and Herzegovina', 'Qatar'],
+    'C': ['Brazil', 'Morocco', 'Scotland', 'Haiti'],
+    'D': ['United States', 'Australia', 'Paraguay', 'Türkiye'],
+    'E': ['Germany', 'Ivory Coast', 'Ecuador', 'Curaçao'],
+    'F': ['Netherlands', 'Japan', 'Sweden', 'Tunisia'],
+    'G': ['Belgium', 'Egypt', 'Iran', 'New Zealand'],
+    'H': ['Spain', 'Cabo Verde', 'Uruguay', 'Saudi Arabia'],
+    'I': ['France', 'Norway', 'Senegal', 'Iraq'],
+    'J': ['Argentina', 'Austria', 'Algeria', 'Jordan'],
+    'K': ['Colombia', 'Portugal', 'DR Congo', 'Uzbekistan'],
+    'L': ['England', 'Croatia', 'Ghana', 'Panama']
 }
 
 st.subheader("1. Group Stage Standings")
