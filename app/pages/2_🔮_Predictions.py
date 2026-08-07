@@ -11,7 +11,6 @@ from src.data.fetcher import load_international_results
 st.set_page_config(page_title="Predictions & EV", page_icon="🔮", layout="wide")
 st.title("🔮 Edge Calculator & Predictions")
 
-# Common team name variations dictionary
 TEAM_NAME_MAP = {
     'usa': 'united states',
     'us': 'united states',
@@ -25,7 +24,6 @@ def normalize_team(name):
     clean = str(name).strip().lower()
     return TEAM_NAME_MAP.get(clean, clean)
 
-# --- 1. Database Connection to Fabric ---
 @st.cache_resource
 def init_connection():
     return pyodbc.connect(
@@ -43,19 +41,12 @@ def get_gold_predictions():
     conn = init_connection()
     query = """
         SELECT 
-            home_team, 
-            away_team, 
-            prob_home_win, 
-            prob_draw, 
-            prob_away_win, 
-            dc_exp_home, 
-            dc_exp_away, 
-            predicted_total_goals
+            home_team, away_team, prob_home_win, prob_draw, prob_away_win, 
+            dc_exp_home, dc_exp_away, predicted_total_goals
         FROM dbo.gold_match_predictions
     """
     return pd.read_sql(query, conn)
 
-# --- 2. Fetch Gold Data ---
 try:
     with st.spinner("Fetching predictions from Microsoft Fabric..."):
         df_predictions = get_gold_predictions()
@@ -74,33 +65,23 @@ except Exception as e:
     st.warning(f"Could not load official calendar fixtures: {e}")
     wc_games = pd.DataFrame()
 
-# --- 3. EVALUATION TOGGLE WITH PAGINATION ---
+# --- EVALUATION TOGGLE WITH PAGINATION ---
 evaluate_mode = st.toggle("📊 Show Actual Results & Evaluate Model Accuracy")
 
-if evaluate_mode and not df_predictions.empty:
+if evaluate_mode and not wc_games.empty:
     st.subheader("Model Post-Mortem: Predictions vs Reality")
     
-    # Normalize team names for seamless merging
-    if not wc_games.empty:
-        wc_games['join_home'] = wc_games['home_team'].apply(normalize_team)
-        wc_games['join_away'] = wc_games['away_team'].apply(normalize_team)
-    else:
-        wc_games['join_home'] = []
-        wc_games['join_away'] = []
-        
+    wc_games['join_home'] = wc_games['home_team'].apply(normalize_team)
+    wc_games['join_away'] = wc_games['away_team'].apply(normalize_team)
     df_predictions['join_home'] = df_predictions['home_team'].apply(normalize_team)
     df_predictions['join_away'] = df_predictions['away_team'].apply(normalize_team)
     
-    # Right merge ensures all predictions stay, even if actual scores are missing
-    eval_df = pd.merge(wc_games, df_predictions, on=['join_home', 'join_away'], how='right')
+    # LEFT JOIN: Keeps ONLY World Cup games from the calendar
+    eval_df = pd.merge(wc_games, df_predictions, on=['join_home', 'join_away'], how='left')
     
-    # Fill missing scores with -1 and fallback team names from df_predictions
     eval_df['home_score'] = eval_df['home_score'].fillna(-1)
     eval_df['away_score'] = eval_df['away_score'].fillna(-1)
-    eval_df['home_team_x'] = eval_df['home_team_x'].fillna(eval_df['home_team_y'])
-    eval_df['away_team_x'] = eval_df['away_team_x'].fillna(eval_df['away_team_y'])
     
-    # Determine Actual Outcome & Model Pick
     def get_actual(row):
         if row['home_score'] == -1: return 'Pending'
         if row['home_score'] > row['away_score']: return 'Home Win'
@@ -108,6 +89,7 @@ if evaluate_mode and not df_predictions.empty:
         else: return 'Draw'
         
     def get_pred(row):
+        if pd.isna(row['prob_home_win']): return 'No Prediction'
         probs = {'Home Win': row['prob_home_win'], 'Draw': row['prob_draw'], 'Away Win': row['prob_away_win']}
         return max(probs, key=probs.get)
 
@@ -115,7 +97,6 @@ if evaluate_mode and not df_predictions.empty:
     eval_df['Model Pick'] = eval_df.apply(get_pred, axis=1)
     eval_df['Correct?'] = eval_df.apply(lambda r: r['Actual Result'] == r['Model Pick'] if r['Actual Result'] != 'Pending' else None, axis=1)
     
-    # Summary Metrics
     completed_matches = eval_df[eval_df['Actual Result'] != 'Pending']
     accuracy = completed_matches['Correct?'].mean() * 100 if not completed_matches.empty else 0.0
     
@@ -125,7 +106,6 @@ if evaluate_mode and not df_predictions.empty:
     col3.metric("Model Accuracy", f"{accuracy:.1f}%")
     st.divider()
 
-    # --- 13-Match Pagination Logic ---
     PAGE_SIZE = 13
     total_matches = len(eval_df)
     total_pages = max(1, (total_matches + PAGE_SIZE - 1) // PAGE_SIZE)
@@ -147,14 +127,12 @@ if evaluate_mode and not df_predictions.empty:
             st.session_state.eval_page += 1
             st.rerun()
 
-    # Slice dataset for active page
     start_idx = st.session_state.eval_page * PAGE_SIZE
     end_idx = start_idx + PAGE_SIZE
     paged_df = eval_df.iloc[start_idx:end_idx].copy()
 
-    # Clean up formatting for display
     clean_df = paged_df.rename(columns={
-        'date': 'Date', 'home_team_x': 'Home', 'away_team_x': 'Away', 
+        'date': 'Date', 'home_team': 'Home', 'away_team': 'Away', 
         'home_score': 'Home Goals', 'away_score': 'Away Goals'
     })
     
@@ -166,15 +144,13 @@ if evaluate_mode and not df_predictions.empty:
     clean_df = clean_df[display_cols]
     
     def highlight_correct(row):
-        if row['Actual Result'] == 'Pending':
-            return [''] * len(row)
+        if row['Actual Result'] == 'Pending': return [''] * len(row)
         return ['background-color: #d4edda' if row['Correct?'] else 'background-color: #f8d7da'] * len(row)
         
     st.dataframe(clean_df.style.apply(highlight_correct, axis=1), use_container_width=True, hide_index=True)
-    
     st.stop()
 
-# --- 4. Default Betting Mode ---
+# --- Default Betting Mode ---
 if not wc_games.empty:
     default_games = wc_games[['home_team', 'away_team', 'city']].copy()
     default_games.rename(columns={'home_team': 'Home', 'away_team': 'Away', 'city': 'Venue'}, inplace=True)
@@ -197,8 +173,8 @@ if st.button("Calculate Edges"):
         st.markdown(f"### {home} vs {away} 📍 {venue}")
         
         match_data = df_predictions[
-            (df_predictions['home_team'].apply(normalize_team) == normalize_team(home)) & 
-            (df_predictions['away_team'].apply(normalize_team) == normalize_team(away))
+            (df_predictions['join_home'] == normalize_team(home)) & 
+            (df_predictions['join_away'] == normalize_team(away))
         ]
         
         if match_data.empty:
@@ -206,7 +182,6 @@ if st.button("Calculate Edges"):
             continue
             
         match = match_data.iloc[0]
-        
         ev_h, edge_h, kelly_h = calc_ev(match['prob_home_win'], o_h)
         ev_d, edge_d, kelly_d = calc_ev(match['prob_draw'], o_d)
         ev_a, edge_a, kelly_a = calc_ev(match['prob_away_win'], o_a)
