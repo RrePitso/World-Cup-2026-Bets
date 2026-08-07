@@ -6,7 +6,6 @@ import streamlit as st
 import pandas as pd
 import pyodbc
 from src.utils.betting import calc_ev, ev_flag
-from src.data.fetcher import load_international_results
 
 st.set_page_config(page_title="Predictions & EV", page_icon="🔮", layout="wide")
 st.title("🔮 Edge Calculator & Predictions")
@@ -31,7 +30,19 @@ def get_gold_predictions():
     conn.close() 
     return df
 
-# --- 2. Fetch Gold Data ---
+# --- NEW: Direct Calendar Fetch (Adopted from 1_📅_Calendar.py) ---
+@st.cache_data(ttl=3600)
+def get_calendar_data():
+    url = "https://raw.githubusercontent.com/martj42/international_results/master/results.csv"
+    df = pd.read_csv(url)
+    df['date'] = pd.to_datetime(df['date'])
+    
+    # Filter exclusively for 2026 FIFA World Cup matches
+    df_wc = df[df['tournament'] == 'FIFA World Cup'].copy()
+    df_wc = df_wc[df_wc['date'].dt.year == 2026].sort_values('date')
+    return df_wc.reset_index(drop=True)
+
+# --- 2. Fetch Data ---
 try:
     with st.spinner("Fetching predictions from Microsoft Fabric..."):
         df_predictions = get_gold_predictions()
@@ -41,15 +52,7 @@ except Exception as e:
     st.stop()
 
 try:
-    df_calendar = load_international_results()
-    # Failsafe: Reset index just in case the dataset mapped 'date' as the index
-    if df_calendar.index.name == 'date':
-        df_calendar = df_calendar.reset_index()
-        
-    wc_games = df_calendar[
-        (df_calendar['tournament'] == 'FIFA World Cup') & 
-        (df_calendar['date'] >= '2026-06-01')
-    ].copy()
+    wc_games = get_calendar_data()
 except Exception as e:
     st.warning(f"Could not load official calendar fixtures: {e}")
     wc_games = pd.DataFrame()
@@ -61,28 +64,22 @@ if evaluate_mode and not df_predictions.empty:
     st.subheader("Model Post-Mortem: Predictions vs Reality")
     
     if not wc_games.empty:
-        wc_games['join_home'] = wc_games['home_team'].str.strip().str.lower()
-        wc_games['join_away'] = wc_games['away_team'].str.strip().str.lower()
+        # Cast to string to prevent attribute errors on missing data
+        wc_games['join_home'] = wc_games['home_team'].astype(str).str.strip().str.lower()
+        wc_games['join_away'] = wc_games['away_team'].astype(str).str.strip().str.lower()
     else:
         wc_games['join_home'] = []
         wc_games['join_away'] = []
         
-    df_predictions['join_home'] = df_predictions['home_team'].str.strip().str.lower()
-    df_predictions['join_away'] = df_predictions['away_team'].str.strip().str.lower()
+    df_predictions['join_home'] = df_predictions['home_team'].astype(str).str.strip().str.lower()
+    df_predictions['join_away'] = df_predictions['away_team'].astype(str).str.strip().str.lower()
     
-    # LEFT JOIN: Keeps ONLY World Cup games from the calendar
+    # LEFT JOIN: Anchors all 104 official calendar fixtures and maps predictions to them
     eval_df = pd.merge(wc_games, df_predictions, on=['join_home', 'join_away'], how='left')
     
-    # Safely fill missing scores
-    if 'home_score' in eval_df.columns:
-        eval_df['home_score'] = eval_df['home_score'].fillna(-1)
-        eval_df['away_score'] = eval_df['away_score'].fillna(-1)
-    else:
-        eval_df['home_score'] = -1
-        eval_df['away_score'] = -1
-    
+    # Logic handles NaN (unplayed) matches cleanly
     def get_actual(row):
-        if row['home_score'] == -1: return 'Pending'
+        if pd.isna(row.get('home_score', pd.NA)): return 'Pending'
         if row['home_score'] > row['away_score']: return 'Home Win'
         elif row['home_score'] < row['away_score']: return 'Away Win'
         else: return 'Draw'
@@ -100,7 +97,7 @@ if evaluate_mode and not df_predictions.empty:
     accuracy = completed_matches['Correct?'].mean() * 100 if not completed_matches.empty else 0.0
     
     col1, col2, col3 = st.columns(3)
-    col1.metric("Total Matches Predicted", len(eval_df))
+    col1.metric("Total Matches Scheduled", len(eval_df))
     col2.metric("Matches Completed & Scored", len(completed_matches))
     col3.metric("Model Accuracy", f"{accuracy:.1f}%")
     st.divider()
@@ -130,17 +127,22 @@ if evaluate_mode and not df_predictions.empty:
     end_idx = start_idx + PAGE_SIZE
     paged_df = eval_df.iloc[start_idx:end_idx].copy()
 
-    # --- BULLETPROOF DATAFRAME BUILDER ---
-    # This block manually maps the columns, avoiding the brittle rename dictionary
+    # Build clean display dataframe, safely handling dates and NaN scores
     display_df = pd.DataFrame()
-    display_df['Date'] = paged_df['date'] if 'date' in paged_df.columns else 'TBD'
-    display_df['Date'] = display_df['Date'].fillna('TBD')
+    if 'date' in paged_df.columns:
+        display_df['Date'] = paged_df['date'].dt.strftime('%Y-%m-%d').fillna('TBD')
+    else:
+        display_df['Date'] = 'TBD'
+        
+    display_df['Home'] = paged_df.get('home_team_x', paged_df.get('home_team', 'Unknown'))
+    display_df['Away'] = paged_df.get('away_team_x', paged_df.get('away_team', 'Unknown'))
     
-    display_df['Home'] = paged_df['home_team_x'] if 'home_team_x' in paged_df.columns else paged_df.get('home_team', 'Unknown')
-    display_df['Away'] = paged_df['away_team_x'] if 'away_team_x' in paged_df.columns else paged_df.get('away_team', 'Unknown')
-    
-    display_df['Home Goals'] = paged_df['home_score'].replace(-1, '-')
-    display_df['Away Goals'] = paged_df['away_score'].replace(-1, '-')
+    if 'home_score' in paged_df.columns:
+        display_df['Home Goals'] = paged_df['home_score'].apply(lambda x: f"{int(x)}" if pd.notna(x) else "-")
+        display_df['Away Goals'] = paged_df['away_score'].apply(lambda x: f"{int(x)}" if pd.notna(x) else "-")
+    else:
+        display_df['Home Goals'] = "-"
+        display_df['Away Goals'] = "-"
     
     display_df['Actual Result'] = paged_df['Actual Result']
     display_df['Model Pick'] = paged_df['Model Pick']
