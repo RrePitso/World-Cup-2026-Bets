@@ -77,81 +77,100 @@ except Exception as e:
 # --- 3. EVALUATION TOGGLE WITH PAGINATION ---
 evaluate_mode = st.toggle("📊 Show Actual Results & Evaluate Model Accuracy")
 
-if evaluate_mode and not wc_games.empty:
+if evaluate_mode and not df_predictions.empty:
     st.subheader("Model Post-Mortem: Predictions vs Reality")
     
     # Normalize team names for seamless merging
-    wc_games['join_home'] = wc_games['home_team'].apply(normalize_team)
-    wc_games['join_away'] = wc_games['away_team'].apply(normalize_team)
+    if not wc_games.empty:
+        wc_games['join_home'] = wc_games['home_team'].apply(normalize_team)
+        wc_games['join_away'] = wc_games['away_team'].apply(normalize_team)
+    else:
+        wc_games['join_home'] = []
+        wc_games['join_away'] = []
+        
     df_predictions['join_home'] = df_predictions['home_team'].apply(normalize_team)
     df_predictions['join_away'] = df_predictions['away_team'].apply(normalize_team)
     
-    # Merge predictions with actual results
-    eval_df = pd.merge(wc_games, df_predictions, on=['join_home', 'join_away'])
-    eval_df = eval_df.dropna(subset=['home_score', 'away_score'])
+    # Right merge ensures all predictions stay, even if actual scores are missing
+    eval_df = pd.merge(wc_games, df_predictions, on=['join_home', 'join_away'], how='right')
     
-    if eval_df.empty:
-        st.warning("No completed match scores found to evaluate yet.")
-    else:
-        # Determine Actual Outcome & Model Pick
-        def get_actual(row):
-            if row['home_score'] > row['away_score']: return 'Home Win'
-            elif row['home_score'] < row['away_score']: return 'Away Win'
-            else: return 'Draw'
-            
-        def get_pred(row):
-            probs = {'Home Win': row['prob_home_win'], 'Draw': row['prob_draw'], 'Away Win': row['prob_away_win']}
-            return max(probs, key=probs.get)
-
-        eval_df['Actual Result'] = eval_df.apply(get_actual, axis=1)
-        eval_df['Model Pick'] = eval_df.apply(get_pred, axis=1)
-        eval_df['Correct?'] = eval_df['Actual Result'] == eval_df['Model Pick']
+    # Fill missing scores with -1 and fallback team names from df_predictions
+    eval_df['home_score'] = eval_df['home_score'].fillna(-1)
+    eval_df['away_score'] = eval_df['away_score'].fillna(-1)
+    eval_df['home_team_x'] = eval_df['home_team_x'].fillna(eval_df['home_team_y'])
+    eval_df['away_team_x'] = eval_df['away_team_x'].fillna(eval_df['away_team_y'])
+    
+    # Determine Actual Outcome & Model Pick
+    def get_actual(row):
+        if row['home_score'] == -1: return 'Pending'
+        if row['home_score'] > row['away_score']: return 'Home Win'
+        elif row['home_score'] < row['away_score']: return 'Away Win'
+        else: return 'Draw'
         
-        # Summary Metrics
-        accuracy = eval_df['Correct?'].mean() * 100
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Total Matches Evaluated", len(eval_df))
-        col2.metric("Correct Predictions", eval_df['Correct?'].sum())
-        col3.metric("Model Accuracy", f"{accuracy:.1f}%")
-        st.divider()
+    def get_pred(row):
+        probs = {'Home Win': row['prob_home_win'], 'Draw': row['prob_draw'], 'Away Win': row['prob_away_win']}
+        return max(probs, key=probs.get)
 
-        # --- 13-Match Pagination Logic ---
-        PAGE_SIZE = 13
-        total_matches = len(eval_df)
-        total_pages = max(1, (total_matches + PAGE_SIZE - 1) // PAGE_SIZE)
+    eval_df['Actual Result'] = eval_df.apply(get_actual, axis=1)
+    eval_df['Model Pick'] = eval_df.apply(get_pred, axis=1)
+    eval_df['Correct?'] = eval_df.apply(lambda r: r['Actual Result'] == r['Model Pick'] if r['Actual Result'] != 'Pending' else None, axis=1)
+    
+    # Summary Metrics
+    completed_matches = eval_df[eval_df['Actual Result'] != 'Pending']
+    accuracy = completed_matches['Correct?'].mean() * 100 if not completed_matches.empty else 0.0
+    
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total Matches Predicted", len(eval_df))
+    col2.metric("Matches Completed & Scored", len(completed_matches))
+    col3.metric("Model Accuracy", f"{accuracy:.1f}%")
+    st.divider()
+
+    # --- 13-Match Pagination Logic ---
+    PAGE_SIZE = 13
+    total_matches = len(eval_df)
+    total_pages = max(1, (total_matches + PAGE_SIZE - 1) // PAGE_SIZE)
+    
+    if 'eval_page' not in st.session_state:
+        st.session_state.eval_page = 0
         
-        if 'eval_page' not in st.session_state:
-            st.session_state.eval_page = 0
-            
-        col_p1, col_p2, col_p3 = st.columns([1, 2, 1])
-        with col_p1:
-            if st.button("⬅️ Previous 13") and st.session_state.eval_page > 0:
-                st.session_state.eval_page -= 1
-                st.rerun()
-        with col_p2:
-            current_start = st.session_state.eval_page * PAGE_SIZE + 1
-            current_end = min((st.session_state.eval_page + 1) * PAGE_SIZE, total_matches)
-            st.markdown(f"<h5 style='text-align: center;'>Page {st.session_state.eval_page + 1} of {total_pages} (Matches {current_start} - {current_end})</h5>", unsafe_allow_html=True)
-        with col_p3:
-            if st.button("Next 13 ➡️") and st.session_state.eval_page < total_pages - 1:
-                st.session_state.eval_page += 1
-                st.rerun()
+    col_p1, col_p2, col_p3 = st.columns([1, 2, 1])
+    with col_p1:
+        if st.button("⬅️ Previous 13") and st.session_state.eval_page > 0:
+            st.session_state.eval_page -= 1
+            st.rerun()
+    with col_p2:
+        current_start = st.session_state.eval_page * PAGE_SIZE + 1
+        current_end = min((st.session_state.eval_page + 1) * PAGE_SIZE, total_matches)
+        st.markdown(f"<h5 style='text-align: center;'>Page {st.session_state.eval_page + 1} of {total_pages} (Matches {current_start} - {current_end})</h5>", unsafe_allow_html=True)
+    with col_p3:
+        if st.button("Next 13 ➡️") and st.session_state.eval_page < total_pages - 1:
+            st.session_state.eval_page += 1
+            st.rerun()
 
-        # Slice dataset for active page
-        start_idx = st.session_state.eval_page * PAGE_SIZE
-        end_idx = start_idx + PAGE_SIZE
-        paged_df = eval_df.iloc[start_idx:end_idx]
+    # Slice dataset for active page
+    start_idx = st.session_state.eval_page * PAGE_SIZE
+    end_idx = start_idx + PAGE_SIZE
+    paged_df = eval_df.iloc[start_idx:end_idx].copy()
 
-        display_cols = ['date', 'home_team_x', 'away_team_x', 'home_score', 'away_score', 'Actual Result', 'Model Pick', 'Correct?']
-        clean_df = paged_df[display_cols].rename(columns={
-            'date': 'Date', 'home_team_x': 'Home', 'away_team_x': 'Away', 
-            'home_score': 'Home Goals', 'away_score': 'Away Goals'
-        })
+    # Clean up formatting for display
+    clean_df = paged_df.rename(columns={
+        'date': 'Date', 'home_team_x': 'Home', 'away_team_x': 'Away', 
+        'home_score': 'Home Goals', 'away_score': 'Away Goals'
+    })
+    
+    clean_df['Date'] = clean_df['Date'].fillna('TBD')
+    clean_df['Home Goals'] = clean_df['Home Goals'].replace(-1, '-')
+    clean_df['Away Goals'] = clean_df['Away Goals'].replace(-1, '-')
+    
+    display_cols = ['Date', 'Home', 'Away', 'Home Goals', 'Away Goals', 'Actual Result', 'Model Pick', 'Correct?']
+    clean_df = clean_df[display_cols]
+    
+    def highlight_correct(row):
+        if row['Actual Result'] == 'Pending':
+            return [''] * len(row)
+        return ['background-color: #d4edda' if row['Correct?'] else 'background-color: #f8d7da'] * len(row)
         
-        def highlight_correct(row):
-            return ['background-color: #d4edda' if row['Correct?'] else 'background-color: #f8d7da'] * len(row)
-            
-        st.dataframe(clean_df.style.apply(highlight_correct, axis=1), use_container_width=True, hide_index=True)
+    st.dataframe(clean_df.style.apply(highlight_correct, axis=1), use_container_width=True, hide_index=True)
     
     st.stop()
 
