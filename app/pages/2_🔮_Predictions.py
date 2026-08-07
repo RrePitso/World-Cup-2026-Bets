@@ -20,7 +20,7 @@ def init_connection():
         f"UID={st.secrets['fabric']['username']};"
         f"PWD={st.secrets['fabric']['password']};"
         "Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30;"
-        "Authentication=ActiveDirectoryPassword;"
+        "Authentication=ActiveDirectoryServicePrincipal;"
     )
 
 @st.cache_data(ttl=3600)
