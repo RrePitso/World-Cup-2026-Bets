@@ -10,17 +10,7 @@ import itertools
 st.set_page_config(page_title="Tournament Simulator", page_icon="🏆", layout="wide")
 st.title("🏆 Monte Carlo Bracket Simulator")
 
-TEAM_NAME_MAP = {
-    'usa': 'united states', 'us': 'united states', 'korea republic': 'south korea',
-    'dr congo': 'congo dr', 'czechia': 'czech republic'
-}
-
-def normalize_team(name):
-    if pd.isna(name): return ""
-    clean = str(name).strip().lower()
-    return TEAM_NAME_MAP.get(clean, clean)
-
-@st.cache_resource
+# Removed @st.cache_resource here as well
 def init_connection():
     return pyodbc.connect(
         "DRIVER={ODBC Driver 17 for SQL Server};"
@@ -36,8 +26,7 @@ def init_connection():
 def get_gold_predictions():
     conn = init_connection()
     df = pd.read_sql("SELECT * FROM dbo.gold_match_predictions", conn)
-    df['join_home'] = df['home_team'].apply(normalize_team)
-    df['join_away'] = df['away_team'].apply(normalize_team)
+    conn.close()
     return df
 
 try:
@@ -48,13 +37,12 @@ except Exception as e:
     st.stop()
 
 # --- MOCK 2026 GROUPS (48 Teams, 12 Groups of 4) ---
-# Replace these with the official draws if you have them in your config
 MOCK_GROUPS = {
     'A': ['Mexico', 'South Africa', 'Germany', 'Curaçao'],
     'B': ['Canada', 'Bosnia and Herzegovina', 'Austria', 'Jordan'],
     'C': ['United States', 'Paraguay', 'Spain', 'Scotland'],
     'D': ['Mali', 'Gambia', 'Ivory Coast', 'Comoros'],
-    # You will need to populate the remaining 8 groups (E through L)
+    # You can populate the remaining 8 groups (E through L) here
 }
 
 st.subheader("1. Group Stage Engine (Point Calculation)")
@@ -65,11 +53,11 @@ if st.button("Simulate Group Stage"):
     for group, teams in MOCK_GROUPS.items():
         points = {team: 0 for team in teams}
         
-        # Generate round-robin fixtures (6 matches per group)
         for home, away in itertools.combinations(teams, 2):
+            # Reverted to your strict string matching logic here as well
             match_data = df_predictions[
-                (df_predictions['join_home'] == normalize_team(home)) & 
-                (df_predictions['join_away'] == normalize_team(away))
+                (df_predictions['home_team'].str.strip().str.lower() == str(home).strip().lower()) & 
+                (df_predictions['away_team'].str.strip().str.lower() == str(away).strip().lower())
             ]
             
             if not match_data.empty:
@@ -85,7 +73,6 @@ if st.button("Simulate Group Stage"):
                     points[home] += 1
                     points[away] += 1
         
-        # Sort group by points
         sorted_group = sorted(points.items(), key=lambda x: x[1], reverse=True)
         for rank, (team, pts) in enumerate(sorted_group):
             group_standings.append({"Group": group, "Rank": rank + 1, "Team": team, "Points": pts})
