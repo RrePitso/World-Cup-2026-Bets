@@ -12,7 +12,6 @@ st.set_page_config(page_title="Predictions & EV", page_icon="🔮", layout="wide
 st.title("🔮 Edge Calculator & Predictions")
 
 # --- 1. Database Connection to Fabric ---
-# Removed @st.cache_resource so Streamlit doesn't reuse dead/dropped Azure connections (Fixes 08S01)
 def init_connection():
     return pyodbc.connect(
         "DRIVER={ODBC Driver 17 for SQL Server};"
@@ -27,10 +26,9 @@ def init_connection():
 @st.cache_data(ttl=3600)
 def get_gold_predictions():
     conn = init_connection()
-    # Reverted to basic SELECT * to prevent any column mapping issues
     query = "SELECT * FROM dbo.gold_match_predictions"
     df = pd.read_sql(query, conn)
-    conn.close() # Explicitly close the connection to prevent lingering zombie sessions
+    conn.close() 
     return df
 
 # --- 2. Fetch Gold Data ---
@@ -44,6 +42,10 @@ except Exception as e:
 
 try:
     df_calendar = load_international_results()
+    # Failsafe: Reset index just in case the dataset mapped 'date' as the index
+    if df_calendar.index.name == 'date':
+        df_calendar = df_calendar.reset_index()
+        
     wc_games = df_calendar[
         (df_calendar['tournament'] == 'FIFA World Cup') & 
         (df_calendar['date'] >= '2026-06-01')
@@ -59,7 +61,6 @@ if evaluate_mode and not df_predictions.empty:
     st.subheader("Model Post-Mortem: Predictions vs Reality")
     
     if not wc_games.empty:
-        # Reverted to your original string manipulation logic
         wc_games['join_home'] = wc_games['home_team'].str.strip().str.lower()
         wc_games['join_away'] = wc_games['away_team'].str.strip().str.lower()
     else:
@@ -72,8 +73,13 @@ if evaluate_mode and not df_predictions.empty:
     # LEFT JOIN: Keeps ONLY World Cup games from the calendar
     eval_df = pd.merge(wc_games, df_predictions, on=['join_home', 'join_away'], how='left')
     
-    eval_df['home_score'] = eval_df['home_score'].fillna(-1)
-    eval_df['away_score'] = eval_df['away_score'].fillna(-1)
+    # Safely fill missing scores
+    if 'home_score' in eval_df.columns:
+        eval_df['home_score'] = eval_df['home_score'].fillna(-1)
+        eval_df['away_score'] = eval_df['away_score'].fillna(-1)
+    else:
+        eval_df['home_score'] = -1
+        eval_df['away_score'] = -1
     
     def get_actual(row):
         if row['home_score'] == -1: return 'Pending'
@@ -82,7 +88,7 @@ if evaluate_mode and not df_predictions.empty:
         else: return 'Draw'
         
     def get_pred(row):
-        if pd.isna(row['prob_home_win']): return 'No Prediction'
+        if pd.isna(row.get('prob_home_win', pd.NA)): return 'No Prediction'
         probs = {'Home Win': row['prob_home_win'], 'Draw': row['prob_draw'], 'Away Win': row['prob_away_win']}
         return max(probs, key=probs.get)
 
@@ -124,23 +130,27 @@ if evaluate_mode and not df_predictions.empty:
     end_idx = start_idx + PAGE_SIZE
     paged_df = eval_df.iloc[start_idx:end_idx].copy()
 
-    clean_df = paged_df.rename(columns={
-        'date': 'Date', 'home_team_x': 'Home', 'away_team_x': 'Away', 
-        'home_score': 'Home Goals', 'away_score': 'Away Goals'
-    })
+    # --- BULLETPROOF DATAFRAME BUILDER ---
+    # This block manually maps the columns, avoiding the brittle rename dictionary
+    display_df = pd.DataFrame()
+    display_df['Date'] = paged_df['date'] if 'date' in paged_df.columns else 'TBD'
+    display_df['Date'] = display_df['Date'].fillna('TBD')
     
-    clean_df['Date'] = clean_df['Date'].fillna('TBD')
-    clean_df['Home Goals'] = clean_df['Home Goals'].replace(-1, '-')
-    clean_df['Away Goals'] = clean_df['Away Goals'].replace(-1, '-')
+    display_df['Home'] = paged_df['home_team_x'] if 'home_team_x' in paged_df.columns else paged_df.get('home_team', 'Unknown')
+    display_df['Away'] = paged_df['away_team_x'] if 'away_team_x' in paged_df.columns else paged_df.get('away_team', 'Unknown')
     
-    display_cols = ['Date', 'Home', 'Away', 'Home Goals', 'Away Goals', 'Actual Result', 'Model Pick', 'Correct?']
-    clean_df = clean_df[display_cols]
+    display_df['Home Goals'] = paged_df['home_score'].replace(-1, '-')
+    display_df['Away Goals'] = paged_df['away_score'].replace(-1, '-')
+    
+    display_df['Actual Result'] = paged_df['Actual Result']
+    display_df['Model Pick'] = paged_df['Model Pick']
+    display_df['Correct?'] = paged_df['Correct?']
     
     def highlight_correct(row):
         if row['Actual Result'] == 'Pending': return [''] * len(row)
         return ['background-color: #d4edda' if row['Correct?'] else 'background-color: #f8d7da'] * len(row)
         
-    st.dataframe(clean_df.style.apply(highlight_correct, axis=1), use_container_width=True, hide_index=True)
+    st.dataframe(display_df.style.apply(highlight_correct, axis=1), use_container_width=True, hide_index=True)
     st.stop()
 
 # --- 4. Default Betting Mode ---
@@ -165,7 +175,6 @@ if st.button("Calculate Edges"):
             
         st.markdown(f"### {home} vs {away} 📍 {venue}")
         
-        # Reverted strictly back to your logic
         match_data = df_predictions[
             (df_predictions['home_team'].str.strip().str.lower() == str(home).strip().lower()) & 
             (df_predictions['away_team'].str.strip().str.lower() == str(away).strip().lower())
@@ -183,7 +192,6 @@ if st.button("Calculate Edges"):
         
         col1, col2, col3 = st.columns(3)
         col1.metric(f"Home Win ({match['prob_home_win']*100:.1f}%)", f"EV: {ev_h*100:+.1f}%", ev_flag(ev_h, edge_h))
-        # Fixed ev_a being passed to Draw ev_flag from the last iteration
         col2.metric(f"Draw ({match['prob_draw']*100:.1f}%)", f"EV: {ev_d*100:+.1f}%", ev_flag(ev_d, edge_d))
         col3.metric(f"Away Win ({match['prob_away_win']*100:.1f}%)", f"EV: {ev_a*100:+.1f}%", ev_flag(ev_a, edge_a))
         
