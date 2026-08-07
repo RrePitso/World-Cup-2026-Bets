@@ -38,6 +38,7 @@ except Exception as e:
 
 # --- MOCK 2026 GROUPS (48 Teams, 12 Groups of 4) ---
 # Expand this dictionary to include all 48 teams
+# --- MOCK 2026 GROUPS (48 Teams, 12 Groups of 4) ---
 MOCK_GROUPS = {
     'A': ['Mexico', 'South Africa', 'Germany', 'Curaçao'],
     'B': ['Canada', 'Bosnia and Herzegovina', 'Austria', 'Jordan'],
@@ -46,7 +47,11 @@ MOCK_GROUPS = {
     'E': ['Argentina', 'Egypt', 'Switzerland', 'Colombia'],
     'F': ['France', 'Morocco', 'Belgium', 'Norway'],
     'G': ['England', 'Senegal', 'Portugal', 'Ecuador'],
-    'H': ['Brazil', 'Japan', 'Croatia', 'Panama']
+    'H': ['Brazil', 'Japan', 'Croatia', 'Panama'],
+    'I': ['Italy', 'Nigeria', 'South Korea', 'Honduras'],
+    'J': ['Netherlands', 'Ghana', 'Australia', 'Costa Rica'],
+    'K': ['Uruguay', 'Cameroon', 'Saudi Arabia', 'Jamaica'],
+    'L': ['Denmark', 'Algeria', 'Iran', 'New Zealand']
 }
 
 st.subheader("1. Group Stage Standings")
