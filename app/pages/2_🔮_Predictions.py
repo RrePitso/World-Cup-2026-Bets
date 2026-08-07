@@ -6,6 +6,7 @@ import streamlit as st
 import pandas as pd
 import pyodbc
 from src.utils.betting import calc_ev, ev_flag
+from src.data.fetcher import load_international_results
 
 st.set_page_config(page_title="Predictions & EV", page_icon="🔮", layout="wide")
 st.title("🔮 Edge Calculator & Predictions")
@@ -50,15 +51,28 @@ except Exception as e:
     st.stop()
 
 # --- 3. UI Odds & EV Calculation ---
-# Dynamically populate the table using the Fabric dataset instead of hardcoded default games
-if not df_predictions.empty:
-    default_games = df_predictions[['home_team', 'away_team']].copy()
-    default_games.rename(columns={'home_team': 'Home', 'away_team': 'Away'}, inplace=True)
-    default_games['Venue'] = "TBD" # Placeholder for user to edit
-    default_games['Odds Home'] = 2.00 # Placeholder baseline odds
-    default_games['Odds Draw'] = 3.00
-    default_games['Odds Away'] = 2.00
-else:
+# Fetch the actual tournament fixtures using the exact same function as the Calendar
+try:
+    df_calendar = load_international_results()
+    
+    # Filter for 2026 World Cup matches only to prevent data leaks from other tournaments
+    wc_games = df_calendar[
+        (df_calendar['tournament'] == 'FIFA World Cup') & 
+        (df_calendar['date'] >= '2026-06-01')
+    ].copy()
+    
+    if not wc_games.empty:
+        default_games = wc_games[['home_team', 'away_team', 'city']].copy()
+        default_games.rename(columns={'home_team': 'Home', 'away_team': 'Away', 'city': 'Venue'}, inplace=True)
+        default_games['Odds Home'] = 2.00
+        default_games['Odds Draw'] = 3.00
+        default_games['Odds Away'] = 2.00
+    else:
+        # Fallback if the filter returns empty
+        default_games = pd.DataFrame(columns=["Home", "Away", "Venue", "Odds Home", "Odds Draw", "Odds Away"])
+        
+except Exception as e:
+    st.warning(f"Could not load official calendar fixtures: {e}")
     default_games = pd.DataFrame(columns=["Home", "Away", "Venue", "Odds Home", "Odds Draw", "Odds Away"])
 
 edited_df = st.data_editor(default_games, num_rows="dynamic")
@@ -68,13 +82,13 @@ if st.button("Calculate Edges"):
         home, away, venue = row.get('Home'), row.get('Away'), row.get('Venue')
         o_h, o_d, o_a = row.get('Odds Home'), row.get('Odds Draw'), row.get('Odds Away')
         
-        # ERROR FIX: Skip empty rows to prevent the NoneType 'strip' error
+        # Skip empty rows to prevent the NoneType error
         if pd.isna(home) or pd.isna(away) or not str(home).strip() or not str(away).strip():
             continue
             
         st.markdown(f"### {home} vs {away} 📍 {venue}")
         
-        # Look up match using strict case-insensitive team matching
+        # Look up match using strict case-insensitive team matching against the Fabric predictions
         match_data = df_predictions[
             (df_predictions['home_team'].str.strip().str.lower() == str(home).strip().lower()) & 
             (df_predictions['away_team'].str.strip().str.lower() == str(away).strip().lower())
