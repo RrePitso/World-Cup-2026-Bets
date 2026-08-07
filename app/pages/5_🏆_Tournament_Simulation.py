@@ -10,7 +10,7 @@ import itertools
 st.set_page_config(page_title="Tournament Simulator", page_icon="🏆", layout="wide")
 st.title("🏆 Monte Carlo Bracket Simulator")
 
-# Removed @st.cache_resource here as well
+# --- Database Connection ---
 def init_connection():
     return pyodbc.connect(
         "DRIVER={ODBC Driver 17 for SQL Server};"
@@ -37,24 +37,28 @@ except Exception as e:
     st.stop()
 
 # --- MOCK 2026 GROUPS (48 Teams, 12 Groups of 4) ---
+# Expand this dictionary to include all 48 teams
 MOCK_GROUPS = {
     'A': ['Mexico', 'South Africa', 'Germany', 'Curaçao'],
     'B': ['Canada', 'Bosnia and Herzegovina', 'Austria', 'Jordan'],
     'C': ['United States', 'Paraguay', 'Spain', 'Scotland'],
     'D': ['Mali', 'Gambia', 'Ivory Coast', 'Comoros'],
-    # You can populate the remaining 8 groups (E through L) here
+    'E': ['Argentina', 'Egypt', 'Switzerland', 'Colombia'],
+    'F': ['France', 'Morocco', 'Belgium', 'Norway'],
+    'G': ['England', 'Senegal', 'Portugal', 'Ecuador'],
+    'H': ['Brazil', 'Japan', 'Croatia', 'Panama']
 }
 
-st.subheader("1. Group Stage Engine (Point Calculation)")
+st.subheader("1. Group Stage Standings")
 
-if st.button("Simulate Group Stage"):
+if st.button("Simulate Tournament"):
     group_standings = []
 
+    # --- SIMULATE GROUPS ---
     for group, teams in MOCK_GROUPS.items():
         points = {team: 0 for team in teams}
         
         for home, away in itertools.combinations(teams, 2):
-            # Reverted to your strict string matching logic here as well
             match_data = df_predictions[
                 (df_predictions['home_team'].str.strip().str.lower() == str(home).strip().lower()) & 
                 (df_predictions['away_team'].str.strip().str.lower() == str(away).strip().lower())
@@ -80,4 +84,70 @@ if st.button("Simulate Group Stage"):
     df_standings = pd.DataFrame(group_standings)
     st.dataframe(df_standings, use_container_width=True)
 
-    st.info("The engine has calculated group stage points! Next step: Extract the Top 2 from each group + the 8 best 3rd-place teams to build the Round of 32 bracket.")
+    # --- EXTRACT QUALIFIERS ---
+    st.subheader("2. Knockout Stage Qualifiers")
+    
+    top_2 = df_standings[df_standings['Rank'] <= 2]
+    third_place = df_standings[df_standings['Rank'] == 3].sort_values(by='Points', ascending=False).head(8)
+    
+    qualified = pd.concat([top_2, third_place])
+    st.write(f"**Total Qualified Teams:** {len(qualified)} (Top 2 from each group + 8 best 3rd-place teams)")
+    
+    # --- KNOCKOUT BRACKET ENGINE ---
+    if len(qualified) == 32:
+        st.subheader("3. Knockout Bracket Simulation")
+        
+        # Seed teams 1 through 32 based on group stage points
+        seeded_teams = qualified.sort_values(by='Points', ascending=False)['Team'].tolist()
+        
+        # Build initial Round of 32 matchups (Seed 1 vs 32, Seed 2 vs 31...)
+        current_matchups = []
+        for i in range(16):
+            current_matchups.append((seeded_teams[i], seeded_teams[31-i]))
+            
+        def simulate_knockout_match(home, away):
+            match_data = df_predictions[
+                (df_predictions['home_team'].str.strip().str.lower() == str(home).strip().lower()) & 
+                (df_predictions['away_team'].str.strip().str.lower() == str(away).strip().lower())
+            ]
+            if not match_data.empty:
+                m = match_data.iloc[0]
+                # In knockouts, draws are resolved by extra time/penalties. 
+                # We force a winner by strictly comparing home vs away win probabilities.
+                if m['prob_home_win'] > m['prob_away_win']:
+                    return home
+                else:
+                    return away
+            return home # Fallback if prediction is missing
+            
+        def play_round(matchups, round_name):
+            st.markdown(f"#### {round_name}")
+            winners = []
+            
+            # Use columns to create a clean, split visual layout
+            col1, col2 = st.columns(2)
+            for idx, (t1, t2) in enumerate(matchups):
+                winner = simulate_knockout_match(t1, t2)
+                winners.append(winner)
+                
+                display_col = col1 if idx % 2 == 0 else col2
+                display_col.info(f"**{t1}** vs **{t2}**  \n🏆 **{winner}** advances")
+                
+            # Pair the winners up for the next round
+            next_matchups = [(winners[i], winners[i+1]) for i in range(0, len(winners), 2)]
+            return next_matchups
+            
+        r16 = play_round(current_matchups, "Round of 32")
+        st.divider()
+        qf = play_round(r16, "Round of 16")
+        st.divider()
+        sf = play_round(qf, "Quarterfinals")
+        st.divider()
+        final = play_round(sf, "Semifinals")
+        st.divider()
+        
+        st.markdown("### 🌍 World Cup Final")
+        champion = simulate_knockout_match(final[0][0], final[0][1])
+        st.success(f"## {final[0][0]} vs {final[0][1]}  \n# 🏆 WORLD CHAMPION: {champion}")
+    else:
+        st.warning(f"Waiting for full 48-team group configuration. Currently have {len(qualified)} qualified teams.")
