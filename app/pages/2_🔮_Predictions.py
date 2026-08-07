@@ -26,8 +26,6 @@ def init_connection():
 @st.cache_data(ttl=3600)
 def get_gold_predictions():
     conn = init_connection()
-    # Explicit schema 'dbo' added to resolve object name error
-    # Select pre-tournament baseline predictions to prevent data leakage
     query = """
         SELECT 
             home_team, 
@@ -52,24 +50,34 @@ except Exception as e:
     st.stop()
 
 # --- 3. UI Odds & EV Calculation ---
-default_games = pd.DataFrame([
-    {"Home": "Germany", "Away": "Curaçao", "Venue": "Houston", "Odds Home": 1.15, "Odds Draw": 7.00, "Odds Away": 15.00},
-    {"Home": "Austria", "Away": "Jordan", "Venue": "Philadelphia", "Odds Home": 1.90, "Odds Draw": 3.40, "Odds Away": 4.00}
-])
+# Dynamically populate the table using the Fabric dataset instead of hardcoded default games
+if not df_predictions.empty:
+    default_games = df_predictions[['home_team', 'away_team']].copy()
+    default_games.rename(columns={'home_team': 'Home', 'away_team': 'Away'}, inplace=True)
+    default_games['Venue'] = "TBD" # Placeholder for user to edit
+    default_games['Odds Home'] = 2.00 # Placeholder baseline odds
+    default_games['Odds Draw'] = 3.00
+    default_games['Odds Away'] = 2.00
+else:
+    default_games = pd.DataFrame(columns=["Home", "Away", "Venue", "Odds Home", "Odds Draw", "Odds Away"])
 
 edited_df = st.data_editor(default_games, num_rows="dynamic")
 
 if st.button("Calculate Edges"):
     for idx, row in edited_df.iterrows():
-        home, away, venue = row['Home'], row['Away'], row['Venue']
-        o_h, o_d, o_a = row['Odds Home'], row['Odds Draw'], row['Odds Away']
+        home, away, venue = row.get('Home'), row.get('Away'), row.get('Venue')
+        o_h, o_d, o_a = row.get('Odds Home'), row.get('Odds Draw'), row.get('Odds Away')
         
+        # ERROR FIX: Skip empty rows to prevent the NoneType 'strip' error
+        if pd.isna(home) or pd.isna(away) or not str(home).strip() or not str(away).strip():
+            continue
+            
         st.markdown(f"### {home} vs {away} 📍 {venue}")
         
         # Look up match using strict case-insensitive team matching
         match_data = df_predictions[
-            (df_predictions['home_team'].str.strip().str.lower() == home.strip().lower()) & 
-            (df_predictions['away_team'].str.strip().str.lower() == away.strip().lower())
+            (df_predictions['home_team'].str.strip().str.lower() == str(home).strip().lower()) & 
+            (df_predictions['away_team'].str.strip().str.lower() == str(away).strip().lower())
         ]
         
         if match_data.empty:
